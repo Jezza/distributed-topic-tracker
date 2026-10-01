@@ -281,8 +281,13 @@ impl RecordPublisher {
     ///
     /// Checks existing record count for this time slot and skips publishing if
     /// `self.config.bootstrap_config().max_bootstrap_records()` limit reached.
-    pub async fn publish_record(&self, record: Record, cancel_token: CancellationToken) -> Result<()> {
-        self.publish_record_cached_records(record, None, cancel_token).await
+    pub async fn publish_record(
+        &self,
+        record: Record,
+        cancel_token: CancellationToken,
+    ) -> Result<()> {
+        self.publish_record_cached_records(record, None, cancel_token)
+            .await
     }
 
     /// Publish a record to the DHT (using cached get_records) if slot capacity allows.
@@ -298,7 +303,10 @@ impl RecordPublisher {
         let publish_fut = async {
             let records = match cached_records {
                 Some(records) => records,
-                None => self.get_records(record.unix_minute(), cancel_token.clone()).await?,
+                None => {
+                    self.get_records(record.unix_minute(), cancel_token.clone())
+                        .await?
+                }
             };
 
             tracing::debug!(
@@ -316,8 +324,16 @@ impl RecordPublisher {
             }
 
             // Publish own records
-            let sign_key = crate::crypto::keys::signing_keypair(self.topic_id(), record.unix_minute);
-            let salt = crate::crypto::keys::salt(self.topic_id(), record.unix_minute);
+            let sign_key = crate::crypto::keys::signing_keypair(
+                self.topic_id(),
+                record.unix_minute,
+                self.initial_secret_hash,
+            );
+            let salt = crate::crypto::keys::salt(
+                self.topic_id(),
+                record.unix_minute,
+                self.initial_secret_hash,
+            );
             let encryption_key = crate::crypto::keys::encryption_keypair(
                 self.topic_id(),
                 &self.secret_rotation.clone().unwrap_or_default(),
@@ -359,21 +375,30 @@ impl RecordPublisher {
     ///
     /// Filters out records from this publisher's own node ID.
     /// Dedup's records based on pub_key, keeping the highest sequence number per pub_key.
-    pub async fn get_records(&self, unix_minute: u64, cancel_token: CancellationToken) -> Result<HashSet<Record>> {
+    pub async fn get_records(
+        &self,
+        unix_minute: u64,
+        cancel_token: CancellationToken,
+    ) -> Result<HashSet<Record>> {
         let get_fut = async {
             tracing::debug!(
                 "RecordPublisher: fetching records from DHT for unix_minute {}",
                 unix_minute
             );
 
-            let topic_sign = crate::crypto::keys::signing_keypair(self.topic_id(), unix_minute);
+            let topic_sign = crate::crypto::keys::signing_keypair(
+                self.topic_id(),
+                unix_minute,
+                self.initial_secret_hash,
+            );
             let encryption_key = crate::crypto::keys::encryption_keypair(
                 self.topic_id(),
                 &self.secret_rotation.clone().unwrap_or_default(),
                 self.initial_secret_hash,
                 unix_minute,
             );
-            let salt = crate::crypto::keys::salt(self.topic_id(), unix_minute);
+            let salt =
+                crate::crypto::keys::salt(self.topic_id(), unix_minute, self.initial_secret_hash);
 
             // Get records, decrypt and verify
             let records_iter = self

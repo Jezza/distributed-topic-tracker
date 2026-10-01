@@ -86,9 +86,27 @@ async fn main() -> Result<()> {
 
 - Decentralized bootstrap for iroh-gossip topics
 - Ed25519 signing and HPKE shared-secret encryption
+- Shared secret gates the DHT slot itself, not just record contents
 - DHT rate limiting (per-minute record caps)
 - Resilient bootstrap with retries and jitter
 - Background publisher with bubble detection and peer merging
+
+## Topic secrets
+
+A topic is a name plus a shared secret. Both are mixed into the derivation of
+the DHT slot (signing keypair and salt) *and* the record encryption key, so for
+a private topic the shared secret controls three things at once:
+
+- **where** records live — the slot cannot be located from the topic name alone
+- **who may write** there — the DHT signing key is the topic's write capability
+- **who may read** them — record contents are HPKE-encrypted
+
+A topic created with an **empty secret** is public: anyone who knows the name
+derives the same slot, which is the intended behaviour for an open topic.
+
+> This differs from the upstream project, where the signing keypair and salt
+> were derived from the topic hash and minute only. See `PROTOCOL.md` →
+> *Key Derivation* for why that mattered.
 
 ## Testing
 

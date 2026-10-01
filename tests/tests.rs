@@ -188,16 +188,22 @@ fn test_unix_minute_function() {
 fn test_topic_signing_keypair_deterministic() {
     let topic_id = TopicId::from_str("test-topic").expect("failed to create TopicId from_str");
     let unix_minute = 12345u64;
+    let initial_secret_hash = [1u8; 32];
 
-    let key1 = signing_keypair(&topic_id, unix_minute);
-    let key2 = signing_keypair(&topic_id, unix_minute);
+    let key1 = signing_keypair(&topic_id, unix_minute, initial_secret_hash);
+    let key2 = signing_keypair(&topic_id, unix_minute, initial_secret_hash);
 
     // Same inputs should produce same keypair
     assert_eq!(key1.to_bytes(), key2.to_bytes());
 
     // Different unix_minute should produce different keypair
-    let key3 = signing_keypair(&topic_id, unix_minute + 1);
+    let key3 = signing_keypair(&topic_id, unix_minute + 1, initial_secret_hash);
     assert_ne!(key1.to_bytes(), key3.to_bytes());
+
+    // Different secret should produce a different keypair, so that knowing the
+    // topic name alone does not grant write access to the topic's DHT slot.
+    let key4 = signing_keypair(&topic_id, unix_minute, [2u8; 32]);
+    assert_ne!(key1.to_bytes(), key4.to_bytes());
 }
 
 #[test]
@@ -222,16 +228,22 @@ fn test_topic_encryption_keypair_deterministic() {
 fn test_topic_salt_deterministic() {
     let topic_id = TopicId::from_str("test-topic").expect("failed to create TopicId from_str");
     let unix_minute = 12345u64;
+    let initial_secret_hash = [1u8; 32];
 
-    let salt1 = salt(&topic_id, unix_minute);
-    let salt2 = salt(&topic_id, unix_minute);
+    let salt1 = salt(&topic_id, unix_minute, initial_secret_hash);
+    let salt2 = salt(&topic_id, unix_minute, initial_secret_hash);
 
     // Same inputs should produce same salt
     assert_eq!(salt1, salt2);
 
     // Different unix_minute should produce different salt
-    let salt3 = salt(&topic_id, unix_minute + 1);
+    let salt3 = salt(&topic_id, unix_minute + 1, initial_secret_hash);
     assert_ne!(salt1, salt3);
+
+    // Different secret should produce a different salt, so the DHT slot for a
+    // private topic cannot be located from the topic name alone.
+    let salt4 = salt(&topic_id, unix_minute, [2u8; 32]);
+    assert_ne!(salt1, salt4);
 }
 
 #[test]

@@ -14,9 +14,9 @@ The publishing procedure is a rate-limited mechanism that prevents DHT overload 
 1. **Record Discovery**
    - Call `get_records()` to fetch, decrypt, and verify existing records for the current unix minute
    - Use the same key derivation as bootstrap:
-     - Derive signing keypair: `keypair_seed = SHA512(topic_hash + unix_minute)[..32]`
+     - Derive signing keypair: `keypair_seed = SHA512(topic_hash + unix_minute + initial_secret_hash)[..32]`
      - Derive encryption keypair: `enc_keypair_seed = secret_rotation_function.get_unix_minute_secret(topic_hash, unix_minute, initial_secret_hash)`
-     - Calculate salt: `salt = SHA512("salt" + topic_hash + unix_minute)[..32]`
+     - Calculate salt: `salt = SHA512("salt" + topic_hash + unix_minute + initial_secret_hash)[..32]`
      - Query DHT: `get_mutable(signing_pubkey, salt)` with 10s timeout
 
 2. **Rate Limiting Check**
@@ -114,9 +114,9 @@ The bootstrap procedure is a continuous loop that attempts to discover and conne
 
 4. **Record Discovery**
    - Call `get_records()` for both `unix_minute - 1` and `unix_minute`:
-     - Derive signing keypair: `keypair_seed = SHA512(topic_hash + unix_minute)[..32]`
+     - Derive signing keypair: `keypair_seed = SHA512(topic_hash + unix_minute + initial_secret_hash)[..32]`
      - Derive encryption keypair from shared secret
-     - Calculate salt: `SHA512("salt" + topic_hash + unix_minute)[..32]`
+     - Calculate salt: `SHA512("salt" + topic_hash + unix_minute + initial_secret_hash)[..32]`
      - Query DHT: `get_mutable(signing_pubkey, salt)` with 10s timeout
      - Decrypt each record using the encryption keypair
      - Verify signature, unix_minute, and topic hash
@@ -340,11 +340,32 @@ A one-time key encryption scheme is used to protect record content while allowin
 
 ### Key Derivation
 
-**Signing Keypair (Public DHT Discovery):**
+**Signing Keypair (Topic Write Capability):**
 - Purpose: Used for DHT mutable record signing and salt calculation
-- Derivation: `signing_keypair_seed = SHA512(topic_hash + unix_minute)[..32]`
+- Derivation: `signing_keypair_seed = SHA512(topic_hash + unix_minute + initial_secret_hash)[..32]`
 - Key: `ed25519_dalek::SigningKey::from_bytes(signing_keypair_seed)`
-- Public: This keypair is deterministic and publicly derivable
+- Private: Only nodes with the shared secret can derive this keypair. A topic
+  created with an **empty secret** is public — anyone who knows the topic name
+  derives the same keypair, which is the intended semantics for an open topic.
+
+> **Why the secret is part of this derivation.**
+>
+> This keypair is the *write capability* for a topic's DHT slot. BEP44 mutable
+> items are addressed by `(public key, salt)`, and a storing node accepts any
+> `put` carrying a sequence number higher than the one it currently holds.
+>
+> Earlier revisions derived this keypair from `topic_hash + unix_minute` alone,
+> so it was reconstructible by anyone who learned the topic *name*. The shared
+> secret protected record **contents** but not the **location**, which left an
+> asymmetry: a name-only adversary could publish at a high sequence number and
+> overwrite every legitimate bootstrap record for the topic, every minute, for
+> the cost of a handful of DHT writes. The rate limiter does not help, because
+> records are counted after decryption and verification — the attack evicts
+> rather than floods.
+>
+> Mixing `initial_secret_hash` into both the keypair and the salt makes a
+> private topic's slot unlocatable from the name and unwritable without the
+> secret, matching the protection the contents already had.
 
 **Encryption Keypair (Shared Secret Based):**
 - Purpose: Used to encrypt/decrypt the one-time keys
@@ -354,7 +375,7 @@ A one-time key encryption scheme is used to protect record content while allowin
 
 **Salt Calculation:**
 - Purpose: Used as salt parameter for DHT mutable record storage
-- Derivation: `salt = SHA512("salt" + topic_hash + unix_minute)[..32]`
+- Derivation: `salt = SHA512("salt" + topic_hash + unix_minute + initial_secret_hash)[..32]`
 
 ### Encryption Process
 
